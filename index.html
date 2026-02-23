@@ -3004,47 +3004,13 @@ async function callGemini(prompt, attempt = 0) {
   return JSON.parse(clean);
 }
 
-async function openAIDestModal(dest) {
-  currentGuideDest = dest;
-  
-  // 1. Switch the view FIRST so the elements become active in the DOM
+// Main entry — called by every map dot and city card without a builder profile
+async function openAIDestModal(destName) {
+  currentGuideDest = destName;
   showView('aiGuide');
-  
-  // 2. Add a tiny safety check for the elements
-  const titleWrap = document.getElementById('guide-title-wrap');
-  const contentArea = document.getElementById('guide-content-area');
-
-  if (!titleWrap || !contentArea) {
-    console.error("Critical Error: AI Guide elements not found in HTML. Check your IDs!");
-    showToast("Opening guide..."); // Fallback so the user knows something happened
-    return;
-  }
-
-  const cacheKey = `wandr_guide_${dest.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-  const cachedData = localStorage.getItem(cacheKey);
-
-  // 3. Handle Caching
-  if (cachedData) {
-    try {
-        renderAiGuide(JSON.parse(cachedData));
-        return;
-    } catch(e) { localStorage.removeItem(cacheKey); }
-  }
-
-  // 4. Set Loading State safely
-  titleWrap.innerHTML = `<div class="guide-skeleton"><div class="skel-block skel-title" style="width:50%;height:60px;"></div></div>`;
-  contentArea.innerHTML = `<div class="guide-skeleton"><div class="skel-block skel-para"></div><div class="skel-block skel-para"></div></div>`;
-
-  try {
-    const data = await getAiGuide(dest);
-    if (data) {
-        localStorage.setItem(cacheKey, JSON.stringify(data));
-        renderAiGuide(data);
-    }
-  } catch (error) {
-    console.error("AI Fetch Error:", error);
-    contentArea.innerHTML = `<div class="error-box"><h3>Too many requests.</h3><p>Please try again in 1 minute.</p></div>`;
-  }
+  window.scrollTo(0,0);
+  guideRenderSkeleton(destName);
+  guideGenerateAll(destName);
 }
 
 function guideRenderSkeleton(destName) {
