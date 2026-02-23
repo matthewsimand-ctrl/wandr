@@ -3004,53 +3004,46 @@ async function callGemini(prompt, attempt = 0) {
   return JSON.parse(clean);
 }
 
-// --- UPDATED AI DESTINATION GUIDE LOGIC ---
 async function openAIDestModal(dest) {
   currentGuideDest = dest;
+  
+  // 1. Switch the view FIRST so the elements become active in the DOM
   showView('aiGuide');
   
+  // 2. Add a tiny safety check for the elements
+  const titleWrap = document.getElementById('guide-title-wrap');
+  const contentArea = document.getElementById('guide-content-area');
+
+  if (!titleWrap || !contentArea) {
+    console.error("Critical Error: AI Guide elements not found in HTML. Check your IDs!");
+    showToast("Opening guide..."); // Fallback so the user knows something happened
+    return;
+  }
+
   const cacheKey = `wandr_guide_${dest.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
   const cachedData = localStorage.getItem(cacheKey);
 
-  // 1. Check Cache First
+  // 3. Handle Caching
   if (cachedData) {
-    console.log("Loading guide from cache for:", dest);
     try {
-        const parsed = JSON.parse(cachedData);
-        renderAiGuide(parsed);
-        return; // Exit early if we have the data
-    } catch(e) {
-        localStorage.removeItem(cacheKey); // Clear corrupted cache
-    }
+        renderAiGuide(JSON.parse(cachedData));
+        return;
+    } catch(e) { localStorage.removeItem(cacheKey); }
   }
 
-  // 2. No Cache? Show Loader and Fetch
-  document.getElementById('guide-title-wrap').innerHTML = `
-    <div class="guide-skeleton">
-        <div class="skel-block skel-title" style="width:50%;height:60px;"></div>
-    </div>`;
-  document.getElementById('guide-content-area').innerHTML = `
-    <div class="guide-skeleton">
-        <div class="skel-block skel-para"></div>
-        <div class="skel-block skel-para"></div>
-        <div class="skel-block skel-para" style="width:60%;"></div>
-    </div>`;
+  // 4. Set Loading State safely
+  titleWrap.innerHTML = `<div class="guide-skeleton"><div class="skel-block skel-title" style="width:50%;height:60px;"></div></div>`;
+  contentArea.innerHTML = `<div class="guide-skeleton"><div class="skel-block skel-para"></div><div class="skel-block skel-para"></div></div>`;
 
   try {
     const data = await getAiGuide(dest);
     if (data) {
-        // Save to cache for next time
         localStorage.setItem(cacheKey, JSON.stringify(data));
         renderAiGuide(data);
     }
   } catch (error) {
     console.error("AI Fetch Error:", error);
-    document.getElementById('guide-content-area').innerHTML = `
-      <div style="padding: 2rem; background: rgba(196,98,45,0.1); border: 1px solid var(--terracotta); border-radius: 12px; color: var(--sand); text-align: center;">
-        <h3>Temporary Connectivity Issue</h3>
-        <p style="margin-top:0.5rem; opacity: 0.7;">We're receiving too many requests. Please try again in a few minutes or view our pre-built guides below.</p>
-        <button class="hero-cta" style="margin-top:1.5rem; padding: 0.6rem 1.2rem;" onclick="showView('allBlogs')">View All Guides</button>
-      </div>`;
+    contentArea.innerHTML = `<div class="error-box"><h3>Too many requests.</h3><p>Please try again in 1 minute.</p></div>`;
   }
 }
 
