@@ -1890,14 +1890,6 @@ function setBudget(el, type) {
   showToast('Showing ' + type + ' destinations on the map');
 }
 
-// ─── COUNTRY BROWSER ───
-function selectCountry(c, el) {
-  document.querySelectorAll('.country-tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  renderCities(c);
-}
-
-
 // ─── QUIZ ───
 function qNext() {
   quizStep = Math.min(quizStep + 1, 5);
@@ -2817,7 +2809,7 @@ function renderReviews(d) {
 
 // NOTE: Replace with your Gemini API key (free at aistudio.google.com)
 const GEMINI_API_KEY = 'AIzaSyCtnvH9lTaE_w7R6lMrCkOQ80o761oNuHs';
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-1.5-flash-latest';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 let currentGuideDest = '';
@@ -2851,10 +2843,11 @@ function getGuideGradient(destName) {
   return GUIDE_GRADIENTS.default;
 }
 
-async function callGemini(prompt) {
+async function callGemini(prompt, attempt = 0) {
   if (GEMINI_API_KEY === 'YOUR_GEMINI_API_KEY_HERE') {
     throw new Error('NO_KEY');
   }
+
   const res = await fetch(GEMINI_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2864,14 +2857,34 @@ async function callGemini(prompt) {
         temperature: 0.7,
         maxOutputTokens: 4096,
         responseMimeType: 'application/json',
-      },
-      tools: [{ googleSearch: {} }]  // enables real-time web grounding
+      }
+      // Note: googleSearch grounding requires Gemini API billing enabled.
+      // Removed to keep free tier working — model knowledge is comprehensive enough.
     })
   });
-  if (!res.ok) throw new Error('API_ERROR: ' + res.status);
+
+  // Rate limited — wait and retry (up to 3 times)
+  if (res.status === 429) {
+    if (attempt >= 3) throw new Error('Rate limited after 3 retries. Please wait a moment and try again.');
+    const wait = (attempt + 1) * 3000; // 3s, 6s, 9s
+    guideShowRetryStatus(wait / 1000);
+    await new Promise(r => setTimeout(r, wait));
+    return callGemini(prompt, attempt + 1);
+  }
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const msg = errBody?.error?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
   const data = await res.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return JSON.parse(text.replace(/```json|```/g,'').trim());
+  if (!text) throw new Error('Empty response from Gemini');
+
+  // Strip any accidental markdown fences
+  const clean = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+  return JSON.parse(clean);
 }
 
 // Main entry — called by every map dot and city card without a builder profile
@@ -3244,17 +3257,42 @@ function guideRenderNoKey(destName) {
   });
 }
 
+function guideShowRetryStatus(seconds) {
+  const titleWrap = document.getElementById('guide-title-wrap');
+  if (!titleWrap) return;
+  const existing = titleWrap.querySelector('.retry-notice');
+  if (existing) existing.remove();
+  const notice = document.createElement('div');
+  notice.className = 'retry-notice';
+  notice.style.cssText = 'display:inline-flex;align-items:center;gap:0.5rem;background:rgba(212,168,67,0.15);border:1px solid rgba(212,168,67,0.3);color:#fbbf24;border-radius:100px;padding:0.3rem 0.9rem;font-size:0.78rem;margin-top:0.75rem;';
+  notice.innerHTML = `⏳ Rate limited — retrying in ${seconds}s…`;
+  titleWrap.appendChild(notice);
+}
+
 function guideRenderError(destName, err) {
+  const city = destName.split(',')[0];
   document.getElementById('guide-title-wrap').innerHTML = `
-    <h1 class="guide-hero-title">${destName.split(',')[0]}</h1>
-    <p class="guide-hero-tagline">Couldn't load guide — check your API key or try again.</p>`;
+    <h1 class="guide-hero-title">${city}</h1>
+    <p class="guide-hero-tagline" style="color:rgba(245,237,216,0.4);">Guide couldn't load — ${err.message}</p>`;
   document.getElementById('guide-loading-main').style.display = 'none';
   document.getElementById('guide-content-main').style.display = 'block';
+  document.getElementById('guide-about-title').textContent = 'Something went wrong';
   document.getElementById('guide-about-text').innerHTML = `
-    <div style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:12px;padding:1.2rem;">
-      <strong>Error loading guide:</strong> ${err.message}<br>
-      <button onclick="guideRegenerate()" style="margin-top:0.75rem;padding:0.5rem 1.2rem;background:var(--terracotta);color:white;border:none;border-radius:8px;cursor:pointer;font-family:'Outfit',sans-serif;">↻ Try Again</button>
+    <div style="background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.2);border-radius:12px;padding:1.5rem;">
+      <div style="font-weight:700;color:var(--ink);margin-bottom:0.5rem;">⚠️ ${err.message}</div>
+      <p style="color:var(--muted);font-size:0.88rem;line-height:1.65;margin-bottom:1rem;">
+        ${err.message.includes('429') || err.message.includes('Rate')
+          ? 'The free Gemini tier allows ~2 requests/minute. Wait a few seconds and try again.'
+          : 'Check that your API key is valid and try again.'}
+      </p>
+      <button onclick="guideRegenerate()" style="padding:0.6rem 1.4rem;background:var(--terracotta);color:white;border:none;border-radius:8px;cursor:pointer;font-family:'Outfit',sans-serif;font-weight:600;">↻ Try Again</button>
     </div>`;
+  ['guide-highlights','guide-itinerary','guide-food','guide-tips'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.innerHTML = '';
+  });
+  ['guide-weather-loading','guide-facts-loading','guide-prices-loading'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.style.display = 'none';
+  });
 }
 
 function guideRegenerate() {
